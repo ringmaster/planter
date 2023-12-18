@@ -22,6 +22,8 @@ Adafruit_seesaw ss;
 
 #define CLICKTHRESHHOLD 80
 
+#define MENU_TIMEOUT 5
+
 // IMPORTANT: To reduce NeoPixel burnout risk, add 1000 uF capacitor across
 // pixel power leads, add 300 - 500 Ohm resistor on first pixel's data input
 // and minimize distance between Arduino and first pixel.  Avoid connecting
@@ -92,18 +94,15 @@ void loop() {
       if(millis() > timeout + 1000) {
         Serial.print("Click detected (0x"); Serial.print(click, HEX); Serial.print("): ");
         if (click & 0x10 && mode != 3) {
-          mode++;
-          if (mode > 3) mode = 0;
-          Serial.print(" single click, new mode: ");
-          Serial.print(mode);
+          Serial.print(" single click ");
           clict = true;
           timeout = millis();
         }
         // Not sure what double-tap controls yet
         if (click & 0x20 && mode == 3) {
-          mode = 0;
+          mode++;
+          if (mode > 1) mode = 0;
           Serial.print(" double click ");
-          Serial.print(brightness);
           clict = true;
           timeout = millis();
         }
@@ -112,21 +111,30 @@ void loop() {
     }
   }
 
-  // Switch back to color cycle after 30 seconds
-  if(millis() > timeout + 30000 && mode != 3 && mode !=0) {
-    Serial.println("Mode 30 second timeout");
+  lis.read();
+  sensors_event_t event;
+  lis.getEvent(&event);
+  // Switch back to color cycle after MENU_TIMEOUT seconds
+  if(timeout != 0 && millis() > timeout + MENU_TIMEOUT * 1000 && mode != 3 && mode !=0) {
+    Serial.println("Mode timeout");
     mode = 0;
+    timeout = 0;
+  }
+
+  //Serial.print("Z accel: ");Serial.println(event.acceleration.z);
+  if(event.acceleration.z < 9) {
+    mode = 1;
+    timeout = millis();
   }
 
   switch(mode) {
     case 0:
       digitalWrite(PIN_EXTERNAL_POWER, HIGH);
       switch(effect) {
-        case 1:
-          if(x % 30 == 0) fadeColor++;
-          colorWipe(fadeColor);
-        break;
         case 0:
+          if(x % 10 == 0) colorCycle();
+        break;
+        case 1:
           if(x % 100 == 0) {
             for(uint16_t i=0; i<strip.numPixels(); i++) {
               uint32_t col = strip.getPixelColor(i);
@@ -140,21 +148,29 @@ void loop() {
               strip.setPixelColor(id, 255,255,255);
             }
           }
-          strip.show();
         break;
+        case 2:
+          showCapValue();
+          break;
+        case 3:
+          showTempValue();
+          break;
       }
     break;
     case 1:
-      showCapValue();
+      showPicker(4, ceil(millis() - (timeout + MENU_TIMEOUT * 1000)) / 5 );
+      if(clict){
+        mode = showPicker(4);
+        Serial.print("MODE CHANGE: ");Serial.println(mode);
+      }
     break;
     case 2:
-      showTempValue();
     break;
     case 3:
       digitalWrite(PIN_EXTERNAL_POWER, LOW);
     break;
   }
-
+  strip.show();
 }
 
 void showCapValue() {
@@ -163,6 +179,42 @@ void showCapValue() {
   capslow = (capslow * scalespeed + capread) / (scalespeed + 1);
   Serial.print("Capacitive: "); Serial.println(capread);
   colorScale(170, map(capslow, 300, 1016, 0, 100));
+}
+
+byte showPicker(byte amt) {
+  return showPicker(amt, 100);
+}
+
+byte showPicker(byte amt, byte pct) {
+  lis.read();
+  sensors_event_t event;
+  lis.getEvent(&event);
+  double aim = angleFromOrigin(event.acceleration.x, event.acceleration.y);
+  // Serial.print("Acelleration:  x: ");Serial.print(event.acceleration.x);
+  // Serial.print("   y: ");Serial.print(event.acceleration.y);
+  // Serial.print("   aim: ");Serial.println(aim);
+  colorWipe(0,0,0);
+  byte choice = floor(aim / (360 / amt));
+  byte lo = 32 / amt * choice;
+  byte hi = 32 / amt * (choice + 1);
+  // Serial.print("   lo: ");Serial.print(lo);
+  // Serial.print("   hi: ");Serial.println(hi);
+  //lo = (lo + hi) / 2 - (hi - lo) * pct / 200;
+  //hi = (lo + hi) / 2 + (hi - lo) * pct / 200;
+  for(int8_t z = lo; z < hi; z++) {
+    strip.setPixelColor(z, Wheel(map(choice, 0, amt, 0, 255)));
+  }
+  return choice;
+}
+
+double angleFromOrigin(double x, double y) {
+  double angleRadians = atan2(y, x); // Angle in radians
+  double angleDegrees = degrees(angleRadians); // Convert to degrees
+  angleDegrees += 90;
+  if (angleDegrees < 0) {
+    angleDegrees += 360; // Adjust to range [0, 360]
+  }
+  return 360 - angleDegrees;
 }
 
 void showTempValue() {
@@ -176,7 +228,24 @@ void colorWipe(byte WheelPos) {
   for(uint16_t i=0; i<strip.numPixels(); i++) {
     strip.setPixelColor(i, Wheel(WheelPos));
   }
-  strip.show();
+}
+
+uint16_t cycle = 0;
+
+void colorCycle() {
+  cycle++;
+  if (cycle > 512) cycle = 0;
+  for(uint16_t i=0; i<strip.numPixels(); i+=2) {
+    strip.setPixelColor(i, Wheel(floor(cycle/2)/*+(i*8)*/));
+    strip.setPixelColor(i+1, Wheel(ceil(cycle/2)/*+(i*8+8)*/));
+  }
+}
+
+// Fill all dots with a color
+void colorWipe(uint8_t r, uint8_t g, uint8_t b) {
+  for(uint16_t i=0; i<strip.numPixels(); i++) {
+    strip.setPixelColor(i, r, g, b);
+  }
 }
 
 // Scale brightness of color across the range
@@ -187,7 +256,6 @@ void colorScale(byte WheelPos, byte pct) {
   strip.setPixelColor(pct * strip.numPixels() / 100, strip.Color(255, 255, 255));
   strip.setPixelColor((pct * strip.numPixels() / 100) - 1, strip.Color(0, 0, 0));
   strip.setPixelColor((pct * strip.numPixels() / 100) + 1, strip.Color(0, 0, 0));
-  strip.show();
 }
 
 void colorRange(byte bottom, byte top, byte pct) {
@@ -198,7 +266,6 @@ void colorRange(byte bottom, byte top, byte pct) {
   strip.setPixelColor(pct * strip.numPixels() / 100, strip.Color(255, 255, 255));
   strip.setPixelColor((pct * strip.numPixels() / 100) - 1, strip.Color(0, 0, 0));
   strip.setPixelColor((pct * strip.numPixels() / 100) + 1, strip.Color(0, 0, 0));
-  strip.show();
 }
 
 
