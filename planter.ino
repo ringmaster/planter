@@ -2,7 +2,6 @@
 #include <Adafruit_LIS3DH.h>
 #include "Adafruit_seesaw.h"
 
-
 #define PIN PIN_EXTERNAL_NEOPIXELS
 
 // Parameter 1 = number of pixels in strip
@@ -59,6 +58,8 @@ void setup() {
   pinMode(PIN_EXTERNAL_POWER, OUTPUT);
   digitalWrite(PIN_EXTERNAL_POWER, HIGH);
 
+  pinMode(PIN_EXTERNAL_BUTTON, INPUT_PULLUP);
+
   strip.begin();
   strip.setBrightness(brightness);
   strip.show();
@@ -68,8 +69,6 @@ void setup() {
       ring[i][z] = 0;
     }
   }
-
-  pinMode(PIN_EXTERNAL_BUTTON, INPUT_PULLUP);
 }
 
 uint8_t x = 0;
@@ -77,12 +76,26 @@ bool clict = false;
 uint16_t capslow = 0;
 const uint8_t scalespeed = 4;
 uint8_t fadeColor = 0;
-int effect = 0;
+int effect = 1;
+bool btn_dn = false;
 
 void loop() {
   x++;
+
+  uint8_t button = digitalRead(PIN_EXTERNAL_BUTTON);
+  if(button == LOW) {
+    if(!btn_dn) {
+    btn_dn = true;
+    mode++;
+    if(mode > 5) mode = 0;
+    }
+  }
+  else {
+    btn_dn = false;
+  }
   
   // Use tap sensor to cycle modes
+  /*
   uint8_t click = lis.getClick();
   if (click & 0x30) {
     // Click function always triggers twice for some reason.  Ignore second tap
@@ -110,11 +123,13 @@ void loop() {
       }
     }
   }
+  */
 
   lis.read();
   sensors_event_t event;
   lis.getEvent(&event);
   // Switch back to color cycle after MENU_TIMEOUT seconds
+  /*
   if(timeout != 0 && millis() > timeout + MENU_TIMEOUT * 1000 && mode != 3 && mode !=0) {
     Serial.println("Mode timeout");
     mode = 0;
@@ -126,16 +141,20 @@ void loop() {
     mode = 1;
     timeout = millis();
   }
+  */
 
   switch(mode) {
     case 0:
+    case 1:
+    case 2:
+    case 3:
       digitalWrite(PIN_EXTERNAL_POWER, HIGH);
-      switch(effect) {
+      switch(mode) {
         case 0:
           if(x % 10 == 0) colorCycle();
         break;
         case 1:
-          if(x % 100 == 0) {
+          if(x % 30 == 0) {
             for(uint16_t i=0; i<strip.numPixels(); i++) {
               uint32_t col = strip.getPixelColor(i);
               if(col != 0) {
@@ -157,16 +176,15 @@ void loop() {
           break;
       }
     break;
-    case 1:
+    case 4:
+      digitalWrite(PIN_EXTERNAL_POWER, HIGH);
       showPicker(4, ceil(millis() - (timeout + MENU_TIMEOUT * 1000)) / 5 );
       if(clict){
         mode = showPicker(4);
         Serial.print("MODE CHANGE: ");Serial.println(mode);
       }
     break;
-    case 2:
-    break;
-    case 3:
+    case 5:
       digitalWrite(PIN_EXTERNAL_POWER, LOW);
     break;
   }
